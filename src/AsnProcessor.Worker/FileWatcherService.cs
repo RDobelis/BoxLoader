@@ -33,7 +33,7 @@ public class FileWatcherService(ILogger<FileWatcherService> logger, IServiceProv
         await Task.Delay(Timeout.Infinite, stoppingToken);
     }
 
-    private async Task ProcessWhenReady(string path, CancellationToken ct)
+    private async Task ProcessWhenReady(string path, CancellationToken cancellationToken)
     {
         const int maxRetries = 10;
         const int delayMs = 500;
@@ -50,12 +50,12 @@ public class FileWatcherService(ILogger<FileWatcherService> logger, IServiceProv
             catch (IOException)
             {
                 if (i == maxRetries - 1) throw;
-                await Task.Delay(delayMs, ct);
+                await Task.Delay(delayMs, cancellationToken);
             }
         }
 
         using var scope = provider.CreateScope();
         var uploader = scope.ServiceProvider.GetRequiredService<IUploadService>();
-        await uploader.HandleUploadAsync(path, ct);
+        await uploader.HandleUploadAsync(path, cancellationToken);
     }
 }

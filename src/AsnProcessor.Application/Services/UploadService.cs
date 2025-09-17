@@ -13,21 +13,21 @@ public sealed class UploadService(AsnDbContext db, IFileParser parser, IConfigur
     private readonly string _archiveFolder = config.GetValue<string>("ArchiveFolder") ?? "archive";
     private readonly int _batchSize = config.GetValue<int>("BatchSize");
 
-    public async Task HandleUploadAsync(string filePath, CancellationToken ct)
+    public async Task HandleUploadAsync(string filePath, CancellationToken cancellationToken)
     {
         if (!File.Exists(filePath)) throw new FileNotFoundException($"File not found: {filePath}");
 
-        var checksum = await ComputeChecksum(filePath, ct);
-        if (await db.ProcessedFiles.AnyAsync(p => p.ChecksumSha256 == checksum, ct)) return;
+        var checksum = await ComputeChecksum(filePath, cancellationToken);
+        if (await db.ProcessedFiles.AnyAsync(p => p.ChecksumSha256 == checksum, cancellationToken)) return;
 
         Directory.CreateDirectory(_archiveFolder);
 
-        await db.Database.ExecuteSqlRawAsync("PRAGMA synchronous = OFF;", ct);
-        await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode = WAL;", ct);
+        await db.Database.ExecuteSqlRawAsync("PRAGMA synchronous = OFF;", cancellationToken);
+        await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode = WAL;", cancellationToken);
 
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
 
-        await ProcessFile(filePath, ct);
+        await ProcessFile(filePath, cancellationToken);
 
         db.ProcessedFiles.Add(new ProcessedFile
         {
@@ -36,38 +36,38 @@ public sealed class UploadService(AsnDbContext db, IFileParser parser, IConfigur
             ProcessedAt = DateTimeOffset.UtcNow
         });
 
-        await db.SaveChangesAsync(ct);
-        await tx.CommitAsync(ct);
+        await db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
 
         await MoveToArchive(filePath);
     }
 
-    private static async Task<byte[]> ComputeChecksum(string filePath, CancellationToken ct)
+    private static async Task<byte[]> ComputeChecksum(string filePath, CancellationToken cancellationToken)
     {
         await using var fs = File.OpenRead(filePath);
         using var sha = SHA256.Create();
-        return await sha.ComputeHashAsync(fs, ct);
+        return await sha.ComputeHashAsync(fs, cancellationToken);
     }
 
-    private async Task ProcessFile(string filePath, CancellationToken ct)
+    private async Task ProcessFile(string filePath, CancellationToken cancellationToken)
     {
         var buffer = new List<Box>(_batchSize);
         await using var fs = File.OpenRead(filePath);
 
-        await foreach (var box in parser.ParseAsync(fs, ct))
+        await foreach (var box in parser.ParseAsync(fs, cancellationToken))
         {
             buffer.Add(box);
             if (buffer.Count < _batchSize) continue;
-            await InsertBatchAsync(buffer, ct);
+            await InsertBatchAsync(buffer, cancellationToken);
             buffer.Clear();
         }
 
-        if (buffer.Count > 0) await InsertBatchAsync(buffer, ct);
+        if (buffer.Count > 0) await InsertBatchAsync(buffer, cancellationToken);
     }
 
-    private async Task InsertBatchAsync(List<Box> buffer, CancellationToken ct)
+    private async Task InsertBatchAsync(List<Box> buffer, CancellationToken cancellationToken)
     {
-        await db.BulkInsertAsync(buffer, new BulkConfig { SetOutputIdentity = true }, cancellationToken: ct);
+        await db.BulkInsertAsync(buffer, new BulkConfig { SetOutputIdentity = true }, cancellationToken: cancellationToken);
 
         var allLines = buffer.SelectMany(b => b.Lines.Select(l =>
         {
@@ -75,8 +75,7 @@ public sealed class UploadService(AsnDbContext db, IFileParser parser, IConfigur
             return l;
         })).ToList();
 
-        if (allLines.Count > 0)
-            await db.BulkInsertAsync(allLines, cancellationToken: ct);
+        if (allLines.Count > 0) await db.BulkInsertAsync(allLines, cancellationToken: cancellationToken);
     }
 
     private Task MoveToArchive(string filePath)
