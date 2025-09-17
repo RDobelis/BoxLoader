@@ -25,8 +25,7 @@ public sealed partial class FileParser : IFileParser
             var hdr = HdrRx.Match(line);
             if (hdr.Success)
             {
-                if (current != null)
-                    yield return current;
+                if (current != null) yield return current;
 
                 current = new Box
                 {

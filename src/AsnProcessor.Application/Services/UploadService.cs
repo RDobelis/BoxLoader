@@ -24,10 +24,11 @@ public sealed class UploadService(AsnDbContext db, IFileParser parser) : IUpload
         var already = await db.ProcessedFiles.AnyAsync(p => p.ChecksumSha256 == checksum, cancellationToken);
         if (already) return;
 
-        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
-
+        // Execute pragma statements BEFORE starting transaction
         await db.Database.ExecuteSqlRawAsync("PRAGMA synchronous = OFF;", cancellationToken);
         await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode = WAL;", cancellationToken);
+
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
 
         var buffer = new List<Box>(BatchSize);
 

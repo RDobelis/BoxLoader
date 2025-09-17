@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AsnProcessor.Domain", "src\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AsnProcessor.Infrastructure", "src\AsnProcessor.Infrastructure\AsnProcessor.Infrastructure.csproj", "{4024D3D5-B39F-49BE-B367-07429D79B045}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AsnProcessor.Tests", "AsnProcessor.Tests\AsnProcessor.Tests.csproj", "{E0B79C5A-8515-4303-9BEF-86DAE4765D54}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -38,6 +40,10 @@ Global
 		{4024D3D5-B39F-49BE-B367-07429D79B045}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4024D3D5-B39F-49BE-B367-07429D79B045}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4024D3D5-B39F-49BE-B367-07429D79B045}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E0B79C5A-8515-4303-9BEF-86DAE4765D54}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E0B79C5A-8515-4303-9BEF-86DAE4765D54}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E0B79C5A-8515-4303-9BEF-86DAE4765D54}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E0B79C5A-8515-4303-9BEF-86DAE4765D54}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{DB599FD8-59C4-4543-88E6-107EBFCF2283} = {8A11A175-7BFA-41AC-B12E-2A2A2CDDC04F}
