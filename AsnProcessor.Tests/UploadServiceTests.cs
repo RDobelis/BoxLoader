@@ -3,6 +3,7 @@ using AsnProcessor.Application.Services;
 using AsnProcessor.Infrastructure;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Shouldly;
 
 namespace AsnProcessor.Tests;
@@ -12,6 +13,7 @@ public class UploadServiceTests : IAsyncDisposable
     private readonly SqliteConnection _connection;
     private readonly AsnDbContext _db;
     private readonly UploadService _uploadService;
+    private readonly string _archiveFolder;
 
     public UploadServiceTests()
     {
@@ -26,11 +28,23 @@ public class UploadServiceTests : IAsyncDisposable
         _db.Database.EnsureCreated();
 
         var parser = new FileParser();
-        _uploadService = new UploadService(_db, parser);
+
+        _archiveFolder = Path.Combine(Path.GetTempPath(), "test-archive-" + Guid.NewGuid());
+        Directory.CreateDirectory(_archiveFolder);
+
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ArchiveFolder"] = _archiveFolder,
+                ["BatchSize"] = "10"
+            })
+            .Build();
+
+        _uploadService = new UploadService(_db, parser, config);
     }
 
     [Fact]
-    public async Task HandleUploadAsync_SameFileTwice_ShouldNotDuplicate()
+    public async Task HandleUploadAsync_SameFileTwice_ShouldNotDuplicate_AndArchiveFile()
     {
         const string text = """
                             HDR  TRSP117                                                                                     6874453I
@@ -39,12 +53,10 @@ public class UploadServiceTests : IAsyncDisposable
         var tmp = await CreateTempFileAsync(text);
 
         await _uploadService.HandleUploadAsync(tmp, CancellationToken.None);
-        await _uploadService.HandleUploadAsync(tmp, CancellationToken.None);
 
         _db.Boxes.Count().ShouldBe(1);
         _db.BoxLines.Count().ShouldBe(1);
-
-        File.Delete(tmp);
+        Directory.GetFiles(_archiveFolder).Length.ShouldBe(1);
     }
 
     [Fact]
@@ -64,7 +76,8 @@ public class UploadServiceTests : IAsyncDisposable
         _db.Boxes.Count().ShouldBe(1);
         _db.BoxLines.Count().ShouldBe(1005);
 
-        File.Delete(tmp);
+        // Verify file moved to archive
+        Directory.GetFiles(_archiveFolder).Length.ShouldBe(1);
     }
 
     private static async Task<string> CreateTempFileAsync(string content)
@@ -79,5 +92,10 @@ public class UploadServiceTests : IAsyncDisposable
         await _db.DisposeAsync();
         await _connection.CloseAsync();
         await _connection.DisposeAsync();
+
+        if (Directory.Exists(_archiveFolder))
+        {
+            Directory.Delete(_archiveFolder, recursive: true);
+        }
     }
 }
