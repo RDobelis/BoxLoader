@@ -1,54 +1,61 @@
 ﻿using AsnProcessor.Application.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace AsnProcessor.Worker;
 
-public sealed class FileWatcherService(ILogger<FileWatcherService> logger, IServiceProvider provider, IConfiguration configuration) : BackgroundService
+public class FileWatcherService(ILogger<FileWatcherService> logger, IServiceProvider provider, IOptions<InboxOptions> options) : BackgroundService
 {
-    private readonly string _watchPath = configuration.GetValue<string>("InboxFolder") ?? "inbox";
+    private readonly InboxOptions _options = options.Value;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        Directory.CreateDirectory(_watchPath);
-        logger.LogInformation("Watching folder: {Path}", Path.GetFullPath(_watchPath));
+        Directory.CreateDirectory(_options.InboxPath);
+        Directory.CreateDirectory(_options.ArchivePath);
 
-        using var watcher = new FileSystemWatcher(_watchPath);
+        using var watcher = new FileSystemWatcher(_options.InboxPath);
         watcher.Filter = "*.txt";
-        watcher.IncludeSubdirectories = false;
-        watcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.Size | NotifyFilters.CreationTime;
         watcher.EnableRaisingEvents = true;
 
-        watcher.Created += (_, e) => _ = ProcessWhenReady(e.FullPath, stoppingToken);
-        watcher.Changed += (_, e) => _ = ProcessWhenReady(e.FullPath, stoppingToken);
+        watcher.Created += async (_, e) =>
+        {
+            try
+            {
+                logger.LogInformation("Processing file: {file}", e.FullPath);
+                await ProcessWhenReady(e.FullPath, stoppingToken);
+                logger.LogInformation("Processed: {file}", e.FullPath);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed processing {file}", e.FullPath);
+            }
+        };
 
         await Task.Delay(Timeout.Infinite, stoppingToken);
     }
 
     private async Task ProcessWhenReady(string path, CancellationToken ct)
     {
-        try
+        const int maxRetries = 10;
+        const int delayMs = 500;
+
+        for (var i = 0; i < maxRetries; i++)
         {
-            long lastSize = -1;
-            for (var i = 0; i < 20 && !ct.IsCancellationRequested; i++)
+            try
             {
-                if (!File.Exists(path)) return;
-                
-                var info = new FileInfo(path);
-                if (info.Length > 0 && info.Length == lastSize) break;
-
-                lastSize = info.Length;
-                await Task.Delay(250, ct);
+                await using (File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None))
+                {
+                    break;
+                }
             }
-
-            using var scope = provider.CreateScope();
-            var uploader = scope.ServiceProvider.GetRequiredService<IUploadService>();
-            await uploader.HandleUploadAsync(path, ct);
-
-            logger.LogInformation("Processed: {File}", path);
+            catch (IOException)
+            {
+                if (i == maxRetries - 1) throw;
+                await Task.Delay(delayMs, ct);
+            }
         }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Failed processing {File}", path);
-        }
+
+        using var scope = provider.CreateScope();
+        var uploader = scope.ServiceProvider.GetRequiredService<IUploadService>();
+        await uploader.HandleUploadAsync(path, ct);
     }
 }
