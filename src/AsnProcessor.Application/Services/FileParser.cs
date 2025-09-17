@@ -15,7 +15,7 @@ public sealed class FileParser : IFileParser
             var raw = await reader.ReadLineAsync(ct);
             if (string.IsNullOrWhiteSpace(raw)) continue;
 
-            var tokens = raw.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var tokens = ParseTokens(raw);
             if (tokens.Length == 0) continue;
 
             switch (tokens[0])
@@ -23,26 +23,12 @@ public sealed class FileParser : IFileParser
                 case "HDR":
                 {
                     if (current != null) yield return current;
-
-                    current = new Box
-                    {
-                        SupplierIdentifier = tokens.Length > 1 ? tokens[1] : string.Empty,
-                        Identifier = tokens.Length > 2 ? tokens[2] : string.Empty
-                    };
+                    current = CreateBox(tokens);
                     continue;
                 }
                 case "LINE" when current != null:
                 {
-                    var poNumber = tokens.Length > 1 ? tokens[1] : string.Empty;
-                    var isbn = tokens.Length > 2 ? tokens[2] : string.Empty;
-                    var quantity = tokens.Length > 3 && int.TryParse(tokens[3], out var q) ? q : 0;
-
-                    current.Lines.Add(new BoxLine
-                    {
-                        PoNumber = poNumber,
-                        Isbn = isbn,
-                        Quantity = quantity
-                    });
+                    current.Lines.Add(CreateBoxLine(tokens));
                     break;
                 }
             }
@@ -50,4 +36,21 @@ public sealed class FileParser : IFileParser
 
         if (current != null) yield return current;
     }
+
+    private static string[] ParseTokens(string line) => line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+    private static string GetTokenOrEmpty(string[] tokens, int index) => tokens.Length > index ? tokens[index] : string.Empty;
+
+    private static Box CreateBox(string[] tokens) => new()
+    {
+        SupplierIdentifier = GetTokenOrEmpty(tokens, 1),
+        Identifier = GetTokenOrEmpty(tokens, 2)
+    };
+
+    private static BoxLine CreateBoxLine(string[] tokens) => new()
+    {
+        PoNumber = GetTokenOrEmpty(tokens, 1),
+        Isbn = GetTokenOrEmpty(tokens, 2),
+        Quantity = tokens.Length > 3 && int.TryParse(tokens[3], out var quantity) ? quantity : 0
+    };
 }
