@@ -26,6 +26,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\AsnProcessor.Application\AsnProcessor.Application.csproj" />
+    <ProjectReference Include="..\..\src\AsnProcessor.Domain\AsnProcessor.Domain.csproj" />
+    <ProjectReference Include="..\..\src\AsnProcessor.Infrastructure\AsnProcessor.Infrastructure.csproj" />
     <ProjectReference Include="..\src\AsnProcessor.Application\AsnProcessor.Application.csproj" />
     <ProjectReference Include="..\src\AsnProcessor.Infrastructure\AsnProcessor.Infrastructure.csproj" />
     <ProjectReference Include="..\src\AsnProcessor.Domain\AsnProcessor.Domain.csproj" />
