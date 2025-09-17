@@ -1,50 +1,51 @@
-﻿using System.Runtime.CompilerServices;
-using System.Text.RegularExpressions;
-using AsnProcessor.Application.Abstractions;
+﻿using AsnProcessor.Application.Abstractions;
 using AsnProcessor.Domain.Entities;
 
 namespace AsnProcessor.Application.Services;
 
 public sealed class FileParser : IFileParser
 {
-    private static readonly Regex HdrRx = new(@"^HDR\s+(?<supplier>\S+)\s+(?<box>\S+)\s*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
-
-    private static readonly Regex LineRx = new(@"^LINE\s+(?<po>\S+)\s+(?<isbn>\S+)\s+(?<qty>\d+)\s*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
-
-    public async IAsyncEnumerable<Box> ParseAsync(Stream stream, [EnumeratorCancellation] CancellationToken cancellationToken)
+    public async IAsyncEnumerable<Box> ParseAsync(Stream stream, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         using var reader = new StreamReader(stream);
         Box? current = null;
 
-        while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+        while (!reader.EndOfStream && !ct.IsCancellationRequested)
         {
-            var raw = await reader.ReadLineAsync(cancellationToken);
+            var raw = await reader.ReadLineAsync(ct);
             if (string.IsNullOrWhiteSpace(raw)) continue;
-            var line = raw.TrimEnd();
 
-            var hdr = HdrRx.Match(line);
-            if (hdr.Success)
+            var tokens = raw.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length == 0) continue;
+
+            switch (tokens[0])
             {
-                if (current != null) yield return current;
-
-                current = new Box
+                case "HDR":
                 {
-                    SupplierIdentifier = hdr.Groups["supplier"].Value,
-                    Identifier = hdr.Groups["box"].Value
-                };
-                continue;
+                    if (current != null) yield return current;
+
+                    current = new Box
+                    {
+                        SupplierIdentifier = tokens.Length > 1 ? tokens[1] : string.Empty,
+                        Identifier = tokens.Length > 2 ? tokens[2] : string.Empty
+                    };
+                    continue;
+                }
+                case "LINE" when current != null:
+                {
+                    var poNumber = tokens.Length > 1 ? tokens[1] : string.Empty;
+                    var isbn = tokens.Length > 2 ? tokens[2] : string.Empty;
+                    var quantity = tokens.Length > 3 && int.TryParse(tokens[3], out var q) ? q : 0;
+
+                    current.Lines.Add(new BoxLine
+                    {
+                        PoNumber = poNumber,
+                        Isbn = isbn,
+                        Quantity = quantity
+                    });
+                    break;
+                }
             }
-
-            var match = LineRx.Match(line);
-            if (!match.Success || current == null) continue;
-
-            var quantity = int.TryParse(match.Groups["qty"].Value, out var q) ? q : 0;
-            current.Lines.Add(new BoxLine
-            {
-                PoNumber = match.Groups["po"].Value,
-                Isbn = match.Groups["isbn"].Value,
-                Quantity = quantity
-            });
         }
 
         if (current != null) yield return current;

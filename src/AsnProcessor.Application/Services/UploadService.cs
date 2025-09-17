@@ -2,13 +2,14 @@
 using AsnProcessor.Application.Abstractions;
 using AsnProcessor.Domain.Entities;
 using AsnProcessor.Infrastructure;
+using EFCore.BulkExtensions;
 using Microsoft.EntityFrameworkCore;
 
 namespace AsnProcessor.Application.Services;
 
 public sealed class UploadService(AsnDbContext db, IFileParser parser) : IUploadService
 {
-    private const int BatchSize = 1000;
+    private const int BatchSize = 10_000; // tuned for SQLite
 
     public async Task HandleUploadAsync(string filePath, CancellationToken ct)
     {
@@ -45,32 +46,35 @@ public sealed class UploadService(AsnDbContext db, IFileParser parser) : IUpload
     private async Task ProcessFile(string filePath, CancellationToken ct)
     {
         var buffer = new List<Box>(BatchSize);
-        await using var fs = File.OpenRead(filePath);
 
+        await using var fs = File.OpenRead(filePath);
         await foreach (var box in parser.ParseAsync(fs, ct))
         {
             buffer.Add(box);
-            if (buffer.Count < BatchSize) continue;
-            await InsertBatchAsync(buffer, ct);
-            buffer.Clear();
+
+            if (buffer.Count >= BatchSize)
+            {
+                await InsertBatchAsync(buffer, ct);
+                buffer.Clear();
+            }
         }
 
-        if (buffer.Count > 0) await InsertBatchAsync(buffer, ct);
+        if (buffer.Count > 0)
+            await InsertBatchAsync(buffer, ct);
     }
 
     private async Task InsertBatchAsync(List<Box> buffer, CancellationToken ct)
     {
-        var prev = db.ChangeTracker.AutoDetectChangesEnabled;
-        try
+        // Bulk insert boxes, then bulk insert their lines
+        await db.BulkInsertAsync(buffer, new BulkConfig { SetOutputIdentity = true }, cancellationToken: ct);
+
+        var allLines = buffer.SelectMany(b => b.Lines.Select(l =>
         {
-            db.ChangeTracker.AutoDetectChangesEnabled = false;
-            await db.Boxes.AddRangeAsync(buffer, ct);
-            await db.SaveChangesAsync(ct);
-        }
-        finally
-        {
-            db.ChangeTracker.AutoDetectChangesEnabled = prev;
-        }
+            l.BoxId = b.Id; // ensure FK is set
+            return l;
+        })).ToList();
+
+        if (allLines.Count > 0)
+            await db.BulkInsertAsync(allLines, cancellationToken: ct);
     }
 }
-
