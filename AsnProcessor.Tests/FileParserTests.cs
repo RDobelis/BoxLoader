@@ -1,15 +1,17 @@
 ﻿using System.Text;
 using AsnProcessor.Application.Services;
+using AsnProcessor.Domain.Entities;
 using Shouldly;
 
 namespace AsnProcessor.Tests;
 
 public class FileParserTests
 {
+    private readonly FileParser _fileParser = new();
+
     [Fact]
     public async Task ParseAsync_WhenCalled_ShouldReturnBoxes()
     {
-        var fileParser = new FileParser();
         const string text = """
                             HDR  TRSP117                                                                                     6874453I
                             LINE P000001661                           9781473663800                     12
@@ -18,13 +20,7 @@ public class FileParserTests
                             LINE G000009810                           9781473662179                     8
                             """;
 
-        await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(text));
-
-        var boxes = new List<AsnProcessor.Domain.Entities.Box>();
-        await foreach (var box in fileParser.ParseAsync(ms, CancellationToken.None))
-        {
-            boxes.Add(box);
-        }
+        var boxes = await ParseTextAsync(text);
 
         boxes.Count.ShouldBe(2);
 
@@ -40,7 +36,6 @@ public class FileParserTests
     [Fact]
     public async Task ParseAsync_WhenCalledWithInvalidLines_ShouldIgnoreInvalidLines()
     {
-        var fileParser = new FileParser();
         const string text = """
                             HDR  TRSP117                                                                                     6874453I
                             LINE P000001661                           9781473663800                     12
@@ -48,15 +43,15 @@ public class FileParserTests
                             LINE P000001661                           9781473667273                     2
                             """;
 
-        await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(text));
-
-        var boxes = new List<AsnProcessor.Domain.Entities.Box>();
-        await foreach (var box in fileParser.ParseAsync(ms, CancellationToken.None))
-        {
-            boxes.Add(box);
-        }
+        var boxes = await ParseTextAsync(text);
 
         boxes.Count.ShouldBe(1);
         boxes[0].Lines.Count.ShouldBe(2);
+    }
+
+    private async Task<List<Box>> ParseTextAsync(string text)
+    {
+        await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(text));
+        return await _fileParser.ParseAsync(ms, CancellationToken.None).ToListAsync();
     }
 }
