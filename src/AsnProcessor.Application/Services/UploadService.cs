@@ -10,40 +10,19 @@ public sealed class UploadService(AsnDbContext db, IFileParser parser) : IUpload
 {
     private const int BatchSize = 1000;
 
-    public async Task HandleUploadAsync(string filePath, CancellationToken cancellationToken)
+    public async Task HandleUploadAsync(string filePath, CancellationToken ct)
     {
         if (!File.Exists(filePath)) throw new FileNotFoundException($"File not found: {filePath}");
 
-        byte[] checksum;
-        await using (var fs = File.OpenRead(filePath))
-        using (var sha = SHA256.Create())
-        {
-            checksum = await sha.ComputeHashAsync(fs, cancellationToken);
-        }
+        var checksum = await ComputeChecksum(filePath, ct);
+        if (await db.ProcessedFiles.AnyAsync(p => p.ChecksumSha256 == checksum, ct)) return;
 
-        var already = await db.ProcessedFiles.AnyAsync(p => p.ChecksumSha256 == checksum, cancellationToken);
-        if (already) return;
+        await db.Database.ExecuteSqlRawAsync("PRAGMA synchronous = OFF;", ct);
+        await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode = WAL;", ct);
 
-        // Execute pragma statements BEFORE starting transaction
-        await db.Database.ExecuteSqlRawAsync("PRAGMA synchronous = OFF;", cancellationToken);
-        await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode = WAL;", cancellationToken);
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
 
-        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
-
-        var buffer = new List<Box>(BatchSize);
-
-        await using (var fs2 = File.OpenRead(filePath))
-        {
-            await foreach (var box in parser.ParseAsync(fs2, cancellationToken))
-            {
-                buffer.Add(box);
-                if (buffer.Count < BatchSize) continue;
-                await InsertBatchAsync(buffer, cancellationToken);
-                buffer.Clear();
-            }
-        }
-
-        if (buffer.Count > 0) await InsertBatchAsync(buffer, cancellationToken);
+        await ProcessFile(filePath, ct);
 
         db.ProcessedFiles.Add(new ProcessedFile
         {
@@ -52,8 +31,31 @@ public sealed class UploadService(AsnDbContext db, IFileParser parser) : IUpload
             ProcessedAt = DateTimeOffset.UtcNow
         });
 
-        await db.SaveChangesAsync(cancellationToken);
-        await tx.CommitAsync(cancellationToken);
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+    }
+
+    private static async Task<byte[]> ComputeChecksum(string filePath, CancellationToken ct)
+    {
+        await using var fs = File.OpenRead(filePath);
+        using var sha = SHA256.Create();
+        return await sha.ComputeHashAsync(fs, ct);
+    }
+
+    private async Task ProcessFile(string filePath, CancellationToken ct)
+    {
+        var buffer = new List<Box>(BatchSize);
+        await using var fs = File.OpenRead(filePath);
+
+        await foreach (var box in parser.ParseAsync(fs, ct))
+        {
+            buffer.Add(box);
+            if (buffer.Count < BatchSize) continue;
+            await InsertBatchAsync(buffer, ct);
+            buffer.Clear();
+        }
+
+        if (buffer.Count > 0) await InsertBatchAsync(buffer, ct);
     }
 
     private async Task InsertBatchAsync(List<Box> buffer, CancellationToken ct)
@@ -71,3 +73,4 @@ public sealed class UploadService(AsnDbContext db, IFileParser parser) : IUpload
         }
     }
 }
+

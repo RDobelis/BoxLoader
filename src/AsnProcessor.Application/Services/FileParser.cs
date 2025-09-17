@@ -5,11 +5,11 @@ using AsnProcessor.Domain.Entities;
 
 namespace AsnProcessor.Application.Services;
 
-public sealed partial class FileParser : IFileParser
+public sealed class FileParser : IFileParser
 {
-    private static readonly Regex HdrRx = HdrRegex();
+    private static readonly Regex HdrRx = new(@"^HDR\s+(?<supplier>\S+)\s+(?<box>\S+)\s*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static readonly Regex LineRx = LineRegex();
+    private static readonly Regex LineRx = new(@"^LINE\s+(?<po>\S+)\s+(?<isbn>\S+)\s+(?<qty>\d+)\s*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public async IAsyncEnumerable<Box> ParseAsync(Stream stream, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -32,14 +32,12 @@ public sealed partial class FileParser : IFileParser
                     SupplierIdentifier = hdr.Groups["supplier"].Value,
                     Identifier = hdr.Groups["box"].Value
                 };
-                
                 continue;
             }
 
             var match = LineRx.Match(line);
-            
             if (!match.Success || current == null) continue;
-            
+
             var quantity = int.TryParse(match.Groups["qty"].Value, out var q) ? q : 0;
             current.Lines.Add(new BoxLine
             {
@@ -51,10 +49,4 @@ public sealed partial class FileParser : IFileParser
 
         if (current != null) yield return current;
     }
-
-    [GeneratedRegex(@"^HDR\s+(?<supplier>\S+)\s+(?<box>\S+)\s*$", RegexOptions.Compiled)]
-    private static partial Regex HdrRegex();
-    
-    [GeneratedRegex(@"^LINE\s+(?<po>\S+)\s+(?<isbn>\S+)\s+(?<qty>\d+)\s*$", RegexOptions.Compiled)]
-    private static partial Regex LineRegex();
 }
