@@ -11,16 +11,14 @@ namespace AsnProcessor.Application.Services;
 public sealed class UploadService(AsnDbContext db, IFileParser parser, IConfiguration config) : IUploadService
 {
     private readonly string _archiveFolder = config.GetValue<string>("ArchiveFolder") ?? "archive";
-    private readonly int _batchSize = config.GetValue("BatchSize", 10_000);
+    private readonly int _batchSize = config.GetValue<int>("BatchSize");
 
     public async Task HandleUploadAsync(string filePath, CancellationToken ct)
     {
-        if (!File.Exists(filePath))
-            throw new FileNotFoundException($"File not found: {filePath}");
+        if (!File.Exists(filePath)) throw new FileNotFoundException($"File not found: {filePath}");
 
         var checksum = await ComputeChecksum(filePath, ct);
-        if (await db.ProcessedFiles.AnyAsync(p => p.ChecksumSha256 == checksum, ct))
-            return;
+        if (await db.ProcessedFiles.AnyAsync(p => p.ChecksumSha256 == checksum, ct)) return;
 
         Directory.CreateDirectory(_archiveFolder);
 
@@ -64,8 +62,7 @@ public sealed class UploadService(AsnDbContext db, IFileParser parser, IConfigur
             buffer.Clear();
         }
 
-        if (buffer.Count > 0)
-            await InsertBatchAsync(buffer, ct);
+        if (buffer.Count > 0) await InsertBatchAsync(buffer, ct);
     }
 
     private async Task InsertBatchAsync(List<Box> buffer, CancellationToken ct)
