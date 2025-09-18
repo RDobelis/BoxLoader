@@ -75,9 +75,37 @@ public class UploadServiceTests : IAsyncDisposable
 
         _db.Boxes.Count().ShouldBe(1);
         _db.BoxLines.Count().ShouldBe(1005);
-
-        // Verify file moved to archive
         Directory.GetFiles(_archiveFolder).Length.ShouldBe(1);
+    }
+    
+    [Fact]
+    public async Task HandleUploadAsync_ShouldRenameIfFileExistsInArchive()
+    {
+        const string text1 = """
+                             HDR  TRSP117                                                                                     1111111A
+                             LINE P000001661                           9781473663800                     12
+                             """;
+
+        const string text2 = """
+                             HDR  TRSP117                                                                                     2222222B
+                             LINE P000001662                           9781473663817                     5
+                             """;
+
+        const string fileName = "sameName.txt";
+
+        var tmp1 = Path.Combine(Path.GetTempPath(), fileName);
+        await File.WriteAllTextAsync(tmp1, text1);
+        await _uploadService.HandleUploadAsync(tmp1, CancellationToken.None);
+
+        var tmp2 = Path.Combine(Path.GetTempPath(), fileName);
+        await File.WriteAllTextAsync(tmp2, text2);
+        await _uploadService.HandleUploadAsync(tmp2, CancellationToken.None);
+
+        var archivedFiles = Directory.GetFiles(_archiveFolder);
+        archivedFiles.Length.ShouldBe(2);
+
+        archivedFiles.Any(f => Path.GetFileName(f) == fileName).ShouldBeTrue();
+        archivedFiles.Any(f => Path.GetFileName(f).Contains("_")).ShouldBeTrue();
     }
 
     private static async Task<string> CreateTempFileAsync(string content)
