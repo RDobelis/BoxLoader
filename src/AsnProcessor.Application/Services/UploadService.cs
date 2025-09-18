@@ -11,35 +11,46 @@ namespace AsnProcessor.Application.Services;
 public sealed class UploadService(AsnDbContext db, IFileParser parser, IConfiguration config) : IUploadService
 {
     private readonly string _archiveFolder = config.GetValue<string>("ArchiveFolder") ?? "archive";
+    private readonly string _failedFolder = config.GetValue<string>("FailedFolder") ?? "failed";
     private readonly int _batchSize = config.GetValue<int>("BatchSize");
 
     public async Task HandleUploadAsync(string filePath, CancellationToken cancellationToken)
     {
         if (!File.Exists(filePath)) throw new FileNotFoundException($"File not found: {filePath}");
 
-        var checksum = await ComputeChecksum(filePath, cancellationToken);
-        if (await db.ProcessedFiles.AnyAsync(p => p.ChecksumSha256 == checksum, cancellationToken)) return;
-
-        Directory.CreateDirectory(_archiveFolder);
-
-        await db.Database.ExecuteSqlRawAsync("PRAGMA synchronous = OFF;", cancellationToken);
-        await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode = WAL;", cancellationToken);
-
-        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
-
-        await ProcessFile(filePath, cancellationToken);
-
-        db.ProcessedFiles.Add(new ProcessedFile
+        try
         {
-            FileName = Path.GetFileName(filePath),
-            ChecksumSha256 = checksum,
-            ProcessedAt = DateTimeOffset.UtcNow
-        });
+            var checksum = await ComputeChecksum(filePath, cancellationToken);
+            if (await db.ProcessedFiles.AnyAsync(p => p.ChecksumSha256 == checksum, cancellationToken))
+                return;
 
-        await db.SaveChangesAsync(cancellationToken);
-        await tx.CommitAsync(cancellationToken);
+            Directory.CreateDirectory(_archiveFolder);
+            Directory.CreateDirectory(_failedFolder);
 
-        await MoveToArchive(filePath);
+            await db.Database.ExecuteSqlRawAsync("PRAGMA synchronous = OFF;", cancellationToken);
+            await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode = WAL;", cancellationToken);
+
+            await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+
+            await ProcessFile(filePath, cancellationToken);
+
+            db.ProcessedFiles.Add(new ProcessedFile
+            {
+                FileName = Path.GetFileName(filePath),
+                ChecksumSha256 = checksum,
+                ProcessedAt = DateTimeOffset.UtcNow
+            });
+
+            await db.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+
+            await MoveToArchive(filePath);
+        }
+        catch (Exception)
+        {
+            await MoveToFailed(filePath);
+            throw;
+        }
     }
 
     private static async Task<byte[]> ComputeChecksum(string filePath, CancellationToken cancellationToken)
@@ -80,18 +91,30 @@ public sealed class UploadService(AsnDbContext db, IFileParser parser, IConfigur
 
     private Task MoveToArchive(string filePath)
     {
-        var fileName = Path.GetFileName(filePath);
-        var destPath = Path.Combine(_archiveFolder, fileName);
-
-        if (File.Exists(destPath))
-        {
-            var ts = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-            var name = Path.GetFileNameWithoutExtension(fileName);
-            var ext = Path.GetExtension(fileName);
-            destPath = Path.Combine(_archiveFolder, $"{name}_{ts}{ext}");
-        }
-
+        var destPath = GetUniquePath(_archiveFolder, filePath);
         File.Move(filePath, destPath);
         return Task.CompletedTask;
+    }
+
+    private Task MoveToFailed(string filePath)
+    {
+        var destPath = GetUniquePath(_failedFolder, filePath);
+        File.Move(filePath, destPath);
+        return Task.CompletedTask;
+    }
+
+    private static string GetUniquePath(string targetFolder, string sourceFile)
+    {
+        var fileName = Path.GetFileName(sourceFile);
+        var destPath = Path.Combine(targetFolder, fileName);
+
+        if (!File.Exists(destPath)) return destPath;
+        
+        var ts = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+        var name = Path.GetFileNameWithoutExtension(fileName);
+        var ext = Path.GetExtension(fileName);
+        destPath = Path.Combine(targetFolder, $"{name}_{ts}{ext}");
+
+        return destPath;
     }
 }

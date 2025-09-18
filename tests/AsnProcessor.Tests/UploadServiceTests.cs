@@ -1,9 +1,12 @@
 ﻿using System.Text;
+using AsnProcessor.Application.Abstractions;
 using AsnProcessor.Application.Services;
+using AsnProcessor.Domain.Entities;
 using AsnProcessor.Infrastructure;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using NSubstitute;
 using Shouldly;
 
 namespace AsnProcessor.Tests;
@@ -107,7 +110,43 @@ public class UploadServiceTests : IAsyncDisposable
         archivedFiles.Any(f => Path.GetFileName(f) == fileName).ShouldBeTrue();
         archivedFiles.Any(f => Path.GetFileName(f).Contains("_")).ShouldBeTrue();
     }
+    
+    [Fact]
+    public async Task HandleUploadAsync_WhenParserThrows_ShouldMoveFileToFailed()
+    {
+        var failedFolder = Path.Combine(Path.GetTempPath(), "test-failed-" + Guid.NewGuid());
+        Directory.CreateDirectory(failedFolder);
 
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ArchiveFolder"] = _archiveFolder,
+                ["FailedFolder"] = failedFolder,
+                ["BatchSize"] = "10"
+            })
+            .Build();
+
+        var badParser = Substitute.For<IFileParser>();
+        badParser.ParseAsync(Arg.Any<Stream>(), Arg.Any<CancellationToken>()).Returns(_ => ThrowingAsyncEnumerable());
+
+        var badService = new UploadService(_db, badParser, config);
+
+        var tmp = await CreateTempFileAsync("BROKEN FILE CONTENT");
+
+        await Should.ThrowAsync<InvalidDataException>(async () => await badService.HandleUploadAsync(tmp, CancellationToken.None));
+
+        var failedFiles = Directory.GetFiles(failedFolder);
+        failedFiles.Length.ShouldBe(1);
+        File.Exists(tmp).ShouldBeFalse();
+    }
+
+    private static async IAsyncEnumerable<Box> ThrowingAsyncEnumerable()
+    {
+        await Task.Yield();
+        throw new InvalidDataException("bad data");
+        yield break; // required for async iterators
+    }
+    
     private static async Task<string> CreateTempFileAsync(string content)
     {
         var tmp = Path.GetTempFileName();

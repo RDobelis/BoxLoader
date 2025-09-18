@@ -7,7 +7,7 @@ public class FileWatcherService(ILogger<FileWatcherService> logger, IServiceProv
 {
     private readonly InboxOptions _options = options.Value;
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(_options.InboxPath);
         Directory.CreateDirectory(_options.ArchivePath);
@@ -21,8 +21,8 @@ public class FileWatcherService(ILogger<FileWatcherService> logger, IServiceProv
             try
             {
                 logger.LogInformation("Processing file: {file}", e.FullPath);
-                await ProcessWhenReady(e.FullPath, stoppingToken);
-                logger.LogInformation("Processed: {file}", e.FullPath);
+                await ProcessWhenReady(e.FullPath, cancellationToken);
+                logger.LogInformation("Processed successfully: {file}", e.FullPath);
             }
             catch (Exception ex)
             {
@@ -30,7 +30,7 @@ public class FileWatcherService(ILogger<FileWatcherService> logger, IServiceProv
             }
         };
 
-        await Task.Delay(Timeout.Infinite, stoppingToken);
+        await Task.Delay(Timeout.Infinite, cancellationToken);
     }
 
     private async Task ProcessWhenReady(string path, CancellationToken cancellationToken)
@@ -42,6 +42,7 @@ public class FileWatcherService(ILogger<FileWatcherService> logger, IServiceProv
         {
             try
             {
+                // Try exclusive open → ensures file is not locked
                 await using (File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None))
                 {
                     break;
